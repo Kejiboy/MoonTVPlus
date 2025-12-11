@@ -553,6 +553,17 @@ export function useVoiceChat({
       const currentTime = audioContext.currentTime;
       let nextPlayTime = nextPlayTimeRef.current.get(userId) || currentTime;
 
+      // 检查播放队列是否堆积过多（说明网络延迟导致音频堆积）
+      const MAX_QUEUE_DELAY = 0.5; // 最大允许队列延迟 500ms
+      const queueDelay = nextPlayTime - currentTime;
+
+      if (queueDelay > MAX_QUEUE_DELAY) {
+        // 播放队列堆积太多，丢弃这个音频包并重置队列
+        console.warn(`[VoiceChat] Dropping audio from ${userId} due to queue buildup: ${(queueDelay * 1000).toFixed(0)}ms`);
+        nextPlayTimeRef.current.set(userId, currentTime);
+        return; // 丢弃这个音频包
+      }
+
       // 如果下一个播放时间已经过去，使用当前时间
       if (nextPlayTime < currentTime) {
         nextPlayTime = currentTime;
@@ -703,6 +714,11 @@ export function useVoiceChat({
 
     // 服务器中转事件
     const handleAudioChunk = (data: { userId: string; audioData: number[]; sampleRate?: number }) => {
+      // 过滤掉自己发送的音频，避免回声
+      if (data.userId === socket.id) {
+        return;
+      }
+
       if (strategy === 'server-only' || !peerConnectionsRef.current.has(data.userId)) {
         // 只有在服务器中转模式或WebRTC连接失败时才播放服务器中转的音频
         playServerRelayAudio(data.userId, data.audioData, data.sampleRate || 16000);
